@@ -7059,7 +7059,13 @@ void RenderingDevice::_end_frame() {
 	// texture_update() / buffer_update() lives only in the shadow until
 	// buffer_unmap() flushes it via wgpuQueueWriteBuffer. This must happen
 	// before the command buffer that references these staging buffers is submitted.
-	// On Vulkan/Metal this is a no-op since buffer_map() returns GPU-visible memory.
+	//
+	// WebGPU only. Upload staging blocks are mapped once in _insert_staging_block() and their
+	// data_ptr is used for the rest of the session. On Vulkan buffer_unmap() is a real
+	// vmaUnmapMemory(): the first call drops the allocation's map count to zero and, once the
+	// memory block has no other mappings, VMA unmaps the memory while data_ptr is still written
+	// to every frame (use-after-unmap, crashes on drivers that actually invalidate the mapping).
+	// Metal's buffer_unmap() is empty, which is why this was never observed there.
 	//
 	// Note: we do NOT re-map after unmapping. The shadow buffer persists and
 	// data_ptr remains valid. Re-mapping would unconditionally set map_dirty,
@@ -7069,9 +7075,11 @@ void RenderingDevice::_end_frame() {
 	// specific dirty regions and clear map_dirty, the unmap here is typically a
 	// no-op. Only blocks that weren't handled by command_copy need flushing
 	// (e.g. persistent dynamic buffers).
+#ifdef WEBGPU_ENABLED
 	for (int i = 0; i < upload_staging_buffers.blocks.size(); i++) {
 		driver->buffer_unmap(upload_staging_buffers.blocks[i].driver_id);
 	}
+#endif
 
 	// The command buffer must be copied into a stack variable as the driver workarounds can change the command buffer in use.
 	RDD::CommandBufferID command_buffer = frames[frame].command_buffer;
