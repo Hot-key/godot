@@ -1774,6 +1774,7 @@ private:
 	VertexFormatID _vertex_format_create(const TypedArray<RDVertexAttribute> &p_vertex_formats);
 	RID _vertex_array_create(uint32_t p_vertex_count, VertexFormatID p_vertex_format, const TypedArray<RID> &p_src_buffers, const Vector<int64_t> &p_offsets = Vector<int64_t>());
 	void _draw_list_bind_vertex_buffers_format(DrawListID p_list, VertexFormatID p_vertex_format, uint32_t p_vertex_count, const TypedArray<RID> &p_vertex_buffers, const Vector<int64_t> &p_offsets = Vector<int64_t>());
+	void _draw_list_draw(DrawListID p_list, bool p_use_indices, uint32_t p_instances, uint32_t p_procedural_vertices = 0);
 
 	Ref<RDShaderSPIRV> _shader_compile_spirv_from_source(const Ref<RDShaderSource> &p_source, bool p_allow_cache = true);
 	Vector<uint8_t> _shader_compile_binary_from_spirv(const Ref<RDShaderSPIRV> &p_bytecode, const String &p_shader_name = "");

@@ -122,12 +122,20 @@ async function captureScreenshots(baseUrl) {
     }
 
     const browsers = [];
+    const isCI = !!process.env.CI;
 
     // Try to launch Chrome with WebGPU
     try {
         const chrome = await chromium.launch({
-            headless: false,
-            args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan,UseSkiaRenderer'],
+            headless: isCI,
+            args: isCI
+                ? [
+                    '--enable-unsafe-webgpu',
+                    '--enable-features=Vulkan,UseSkiaRenderer',
+                    '--use-angle=swiftshader',
+                    '--enable-gpu',
+                ]
+                : ['--enable-unsafe-webgpu', '--enable-features=Vulkan,UseSkiaRenderer'],
         });
         browsers.push({ name: 'chromium', browser: chrome });
         console.log('  Chromium: launched');
@@ -138,7 +146,7 @@ async function captureScreenshots(baseUrl) {
     // Try to launch Firefox with WebGPU
     try {
         const ff = await firefox.launch({
-            headless: false,
+            headless: isCI,
             firefoxUserPrefs: {
                 'dom.webgpu.enabled': true,
                 'gfx.webgpu.force-enabled': true,

@@ -17,6 +17,7 @@ SPIR-V → WGSL conversion for ubershaders on every page load.
 
 import json
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -854,6 +855,11 @@ def build_wgsl_precompiled(target, source, env):
     """
     output = str(target[0])
     repo_root = str(env.Dir("#"))
+    glslang = env.get("GLSLANG", "glslangValidator")
+    if not os.path.isfile(glslang) and shutil.which(glslang) is None:
+        print(f"[WGSL Precompile] ERROR: glslangValidator not found: {glslang}", file=sys.stderr)
+        print("[WGSL Precompile] Install glslang-tools or set GLSLANG to its path.", file=sys.stderr)
+        sys.exit(1)
 
     # Build tint_convert_cli (native host tool) via build.sh.
     build_script = os.path.join(repo_root, "drivers", "webgpu", "tint_cli", "build.sh")
@@ -865,14 +871,18 @@ def build_wgsl_precompiled(target, source, env):
     result = subprocess.run(
         ["bash", build_script],
         cwd=repo_root,
-        timeout=600,
+        # Cold CI runners compile hundreds of Tint translation units and can
+        # exceed ten minutes under load. Keep this below the job's 90-minute limit.
+        timeout=1800,
     )
     if result.returncode != 0:
         print("[WGSL Precompile] ERROR: tint_convert_cli build failed", file=sys.stderr)
         sys.exit(1)
 
-    glslang = env.get("GLSLANG", "glslangValidator")
-    precompile_wgsl(repo_root, output, glslang)
+    count = precompile_wgsl(repo_root, output, glslang)
+    if count == 0:
+        print("[WGSL Precompile] ERROR: No shaders were precompiled.", file=sys.stderr)
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

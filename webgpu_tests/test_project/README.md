@@ -80,8 +80,10 @@ A Godot 4.6 project that programmatically creates a scene exercising **100% of R
 
 ### With SPIR-V dump (for shader validation)
 ```bash
-# Build engine with dump enabled:
-GODOT_DUMP_SPIRV=/tmp/spirv_dump godot --headless --path . --quit
+# Run with a display so RenderingDevice shaders are compiled lazily while rendering.
+# On Linux CI, one frame is enough to compile the coverage scene's shaders:
+# xvfb-run godot --audio-driver Dummy --path . --quit-after 1
+GODOT_DUMP_SPIRV=/tmp/spirv_dump godot --path . --quit-after 10
 
 # Validate all dumped SPIR-V through Tint:
 node ../shader_corpus/validate_spirv_dump.mjs /tmp/spirv_dump/

@@ -93,6 +93,7 @@ ignore-words-list = [
 	"requestor",
 	"streamin",
 	"te",
+	"tese",
 	"textin",
 	"thirdparty",
 	"vai",

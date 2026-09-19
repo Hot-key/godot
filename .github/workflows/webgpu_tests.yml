@@ -5,11 +5,13 @@ on:
   push:
     branches: [webgpu-4.6.2]
     paths:
+      - '.github/workflows/webgpu_tests.yml'
       - 'drivers/webgpu/**'
       - 'webgpu_tests/**'
       - 'servers/rendering/**'
   pull_request:
     paths:
+      - '.github/workflows/webgpu_tests.yml'
       - 'drivers/webgpu/**'
       - 'webgpu_tests/**'
       - 'servers/rendering/**'
@@ -113,6 +115,11 @@ jobs:
       - name: Setup Python and SCons
         uses: ./.github/actions/godot-deps
 
+      - name: Install shader test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools mesa-vulkan-drivers
+
       - name: Build WebGPU export template
         uses: ./.github/actions/godot-build
         with:
@@ -128,35 +135,64 @@ jobs:
 
       - name: Build Linux editor (for export + SPIR-V dump)
         run: |
+          # godot-build removes editor/ for template builds. Restore it before
+          # building the editor in the same job.
+          git restore --source=HEAD --worktree -- editor
           scons platform=linuxbsd target=editor dev_mode=yes tests=no debug_symbols=no -j$(nproc)
 
-      - name: Export test project with SPIR-V dump
+      - name: Install WebGPU export template
+        run: |
+          # Install the WebGPU template under the exact engine version. Godot
+          # validates both names before exporting, even for --export-release.
+          template_version=$(python3 -c 'import version; print(f"{version.major}.{version.minor}.{version.patch}.{version.status}")')
+          template_dir="$HOME/.local/share/godot/export_templates/$template_version"
+          mkdir -p "$template_dir"
+          cp bin/godot.web.template_release.wasm32.nothreads.dlink.zip \
+             "$template_dir/web_nothreads_release.zip"
+          cp bin/godot.web.template_release.wasm32.nothreads.dlink.zip \
+             "$template_dir/web_nothreads_debug.zip"
+
+      - name: Run shader coverage scene and dump SPIR-V
         run: |
           mkdir -p /tmp/spirv_dump
-          mkdir -p webgpu_tests/test_project/export
 
-          # Install WebGPU template (editor looks for web_nothreads_release.zip)
-          mkdir -p ~/.local/share/godot/export_templates/4.6.2.dev
-          cp bin/godot.web.template_release.wasm32.nothreads.dlink.zip \
-             ~/.local/share/godot/export_templates/4.6.2.dev/web_nothreads_release.zip || true
-
-          # Run editor headless to import project and compile all shaders
-          # GODOT_DUMP_SPIRV causes all compiled SPIR-V to be written to disk
+          # RenderingDevice shaders compile lazily while rendering. Match
+          # Godot's project-test action: run Vulkan in a virtual X11 display
+          # instead of using --headless, which selects the dummy renderer.
           GODOT_DUMP_SPIRV=/tmp/spirv_dump timeout 120 \
-            bin/godot.linuxbsd.editor.x86_64 \
-              --headless --path webgpu_tests/test_project \
-              --export-release "WebGPU" export/index.html || true
+            xvfb-run --auto-servernum \
+              bin/godot.linuxbsd.editor.x86_64 \
+                --audio-driver Dummy \
+                --path webgpu_tests/test_project \
+                --quit-after 1
 
           echo "SPIR-V files dumped:"
           ls -la /tmp/spirv_dump/ | head -50
-          echo "Total: $(ls /tmp/spirv_dump/*.spv 2>/dev/null | wc -l) files"
+          spirv_count=$(find /tmp/spirv_dump -maxdepth 1 -type f -name '*.spv' | wc -l)
+          echo "Total: $spirv_count files"
+          test "$spirv_count" -gt 0
+
+          # Shader dump names contain ':' between the shader and variant. Keep
+          # those canonical names inside an archive because upload-artifact
+          # rejects ':' for cross-platform filesystem compatibility.
+          tar -C /tmp/spirv_dump -cf /tmp/spirv-dump.tar .
+
+      - name: Export test project
+        run: |
+          mkdir -p webgpu_tests/test_project/export
+          timeout 120 bin/godot.linuxbsd.editor.x86_64 \
+            --headless --path webgpu_tests/test_project \
+            --export-release "WebGPU" export/index.html
+
+          test -f webgpu_tests/test_project/export/index.html
 
       - name: Upload SPIR-V dump
         uses: actions/upload-artifact@v4
         with:
           name: spirv-dump
-          path: /tmp/spirv_dump/
+          path: /tmp/spirv-dump.tar
           retention-days: 7
+          if-no-files-found: error
 
       - name: Upload WebGPU export
         uses: actions/upload-artifact@v4
@@ -164,6 +200,7 @@ jobs:
           name: webgpu-export
           path: webgpu_tests/test_project/export/
           retention-days: 7
+          if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════════
   # SPIR-V Validation: Validate ALL engine SPIR-V through Tint
@@ -188,7 +225,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: spirv-dump
-          path: /tmp/spirv_dump/
+          path: /tmp/spirv_artifact/
+
+      - name: Extract SPIR-V dump
+        run: |
+          mkdir -p /tmp/spirv_dump
+          tar -C /tmp/spirv_dump -xf /tmp/spirv_artifact/spirv-dump.tar
 
       - name: Validate all SPIR-V through Tint
         run: |
@@ -227,7 +269,7 @@ jobs:
 
       - name: Run smoke test
         working-directory: webgpu_tests/test_project
-        run: node smoke_test.mjs ./export/
+        run: xvfb-run --auto-servernum node smoke_test.mjs ./export/
 
   # ═══════════════════════════════════════════════════════════════════════════════
   # Scene Smoketest: 18 demos/benchmarks across Chrome + Firefox
@@ -293,6 +335,8 @@ jobs:
     runs-on: ubuntu-24.04
     name: Screenshot Comparison (Chrome + Firefox)
     timeout-minutes: 20
+    outputs:
+      test_result: ${{ steps.screenshot_tests.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -310,6 +354,8 @@ jobs:
           npx playwright install chromium firefox --with-deps
 
       - name: Run screenshot tests
+        id: screenshot_tests
+        continue-on-error: true
         working-directory: webgpu_tests/screenshot_comparison
         run: node screenshot_tests.mjs --update-baselines
         # First run creates baselines. On subsequent runs after baselines are committed,
@@ -329,7 +375,7 @@ jobs:
   test-summary:
     runs-on: ubuntu-24.04
     name: Test Summary
-    needs: [shader-corpus, driver-unit-tests, validate-spirv, smoke-test, scene-smoketest, resource-lifecycle, screenshot-comparison]
+    needs: [shader-corpus, driver-unit-tests, build-webgpu, validate-spirv, smoke-test, scene-smoketest, resource-lifecycle, screenshot-comparison]
     if: always()
     steps:
       - name: Check results
@@ -340,11 +386,12 @@ jobs:
           echo ""
           echo "  Shader Corpus:        ${{ needs.shader-corpus.result }}"
           echo "  Driver Unit Tests:    ${{ needs.driver-unit-tests.result }}"
+          echo "  WebGPU Build:         ${{ needs.build-webgpu.result }}"
           echo "  SPIR-V Validation:    ${{ needs.validate-spirv.result }}"
           echo "  Smoke Test:           ${{ needs.smoke-test.result }}"
           echo "  Scene Smoketest:      ${{ needs.scene-smoketest.result }}"
           echo "  Resource Lifecycle:   ${{ needs.resource-lifecycle.result }}"
-          echo "  Screenshot Compare:   ${{ needs.screenshot-comparison.result }}"
+          echo "  Screenshot Compare:   ${{ needs.screenshot-comparison.outputs.test_result }}"
           echo ""
 
           FAILED=0
@@ -355,6 +402,10 @@ jobs:
           fi
           if [ "${{ needs.driver-unit-tests.result }}" = "failure" ]; then
             echo "::error::Driver unit tests failed"
+            FAILED=1
+          fi
+          if [ "${{ needs.build-webgpu.result }}" != "success" ]; then
+            echo "::error::WebGPU build did not succeed (${{ needs.build-webgpu.result }})"
             FAILED=1
           fi
           if [ "${{ needs.validate-spirv.result }}" = "failure" ]; then
@@ -374,7 +425,7 @@ jobs:
             FAILED=1
           fi
           # Screenshot comparison failures are warnings, not blockers
-          if [ "${{ needs.screenshot-comparison.result }}" = "failure" ]; then
+          if [ "${{ needs.screenshot-comparison.outputs.test_result }}" = "failure" ]; then
             echo "::warning::Screenshot comparison detected visual differences"
           fi
 

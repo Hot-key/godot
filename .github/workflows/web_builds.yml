@@ -25,24 +25,28 @@ jobs:
             cache-name: web-template
             target: template_release
             scons-flags: threads=yes
+            webgpu: false
             artifact: true
 
           - name: Template w/o threads (target=template_release, threads=no)
             cache-name: web-nothreads-template
             target: template_release
             scons-flags: threads=no
+            webgpu: false
             artifact: true
 
           - name: Template WebGPU (target=template_release, webgpu=yes)
             cache-name: web-webgpu-template
             target: template_release
             scons-flags: threads=no webgpu=yes opengl3=no
+            webgpu: true
             artifact: true
 
           - name: Template WebGPU debug (target=template_debug, webgpu=yes)
             cache-name: web-webgpu-template-debug
             target: template_debug
             scons-flags: threads=no webgpu=yes opengl3=no
+            webgpu: true
             artifact: false
 
     steps:
@@ -69,6 +73,12 @@ jobs:
 
       - name: Setup Python and SCons
         uses: ./.github/actions/godot-deps
+
+      - name: Install glslangValidator
+        if: matrix.webgpu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools
 
       - name: Compilation
         uses: ./.github/actions/godot-build
