@@ -1399,6 +1399,11 @@ const _GodotAudio = {
 		 * @returns {void}
 		 */
 		sample_set_pause: function (playbackObjectId, pause) {
+			// `close_async` clears the context before the scene tree is torn down, so exiting
+			// `AudioStreamPlayer`s still ask their sample to pause. Nothing left to pause then.
+			if (GodotAudio.ctx == null) {
+				return;
+			}
 			GodotAudio.SampleNode.pauseSampleNode(playbackObjectId, pause);
 		},
 
