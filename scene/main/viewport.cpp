@@ -2560,6 +2560,19 @@ void Viewport::_gui_remove_control(Control *p_control) {
 	if (gui.tooltip_control == p_control) {
 		gui.tooltip_control = nullptr;
 	}
+	if (over_id.is_valid()) {
+		// A touch may still be held on a control that just left the tree. Drop it, or the
+		// release will be routed to a node that is no longer inside the tree.
+		LocalVector<int> dropped_touches;
+		for (const KeyValue<int, ObjectID> &E : gui.touch_focus) {
+			if (E.value == over_id) {
+				dropped_touches.push_back(E.key);
+			}
+		}
+		for (const int &touch_index : dropped_touches) {
+			gui.touch_focus.erase(touch_index);
+		}
+	}
 }
 
 void Viewport::canvas_item_top_level_changed() {
