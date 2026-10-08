@@ -1236,6 +1236,7 @@ void Window::_update_viewport_size() {
 	Size2 final_size_override;
 	Rect2i attach_to_screen_rect(Point2i(), size);
 	window_transform = Transform2D();
+	bool renders_at_screen_size = true;
 
 	if (content_scale_stretch == Window::CONTENT_SCALE_STRETCH_INTEGER) {
 		// We always want to make sure that the content scale factor is a whole
@@ -1337,6 +1338,7 @@ void Window::_update_viewport_size() {
 			case CONTENT_SCALE_MODE_VIEWPORT: {
 				final_size = (viewport_size / content_scale_factor).floor();
 				attach_to_screen_rect = Rect2(margin, screen_size);
+				renders_at_screen_size = false;
 
 				window_transform.translate_local(margin);
 				if (final_size.x != 0 && final_size.y != 0) {
@@ -1346,6 +1348,17 @@ void Window::_update_viewport_size() {
 				}
 			} break;
 		}
+	}
+
+	// Render at a fraction of the screen resolution while keeping the 2D coordinate space (final_size_override),
+	// then upscale to the screen like CONTENT_SCALE_MODE_VIEWPORT does. Embedded windows draw into their
+	// embedder's canvas and size their viewport separately below, so they are left alone.
+	if (renders_at_screen_size && content_scale_render_scale != 1.0 && !embedder && final_size.x > 0 && final_size.y > 0) {
+		const Vector2 screen_size = final_size;
+		final_size = (screen_size * content_scale_render_scale).floor().max(Vector2(1, 1));
+		Transform2D scale_transform;
+		scale_transform.scale(screen_size / Vector2(final_size));
+		window_transform *= scale_transform;
 	}
 
 	bool allocate = is_inside_tree() && visible && (window_id != DisplayServer::INVALID_WINDOW_ID || embedder != nullptr);
@@ -1779,6 +1792,21 @@ void Window::set_content_scale_factor(real_t p_factor) {
 real_t Window::get_content_scale_factor() const {
 	ERR_READ_THREAD_GUARD_V(0);
 	return content_scale_factor;
+}
+
+void Window::set_content_scale_render_scale(real_t p_scale) {
+	ERR_MAIN_THREAD_GUARD;
+	ERR_FAIL_COND(p_scale <= 0);
+	if (content_scale_render_scale == p_scale) {
+		return;
+	}
+	content_scale_render_scale = p_scale;
+	_update_viewport_size();
+}
+
+real_t Window::get_content_scale_render_scale() const {
+	ERR_READ_THREAD_GUARD_V(0);
+	return content_scale_render_scale;
 }
 
 void Window::set_nonclient_area(const Rect2i &p_rect) {
@@ -3330,6 +3358,9 @@ void Window::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_content_scale_factor", "factor"), &Window::set_content_scale_factor);
 	ClassDB::bind_method(D_METHOD("get_content_scale_factor"), &Window::get_content_scale_factor);
 
+	ClassDB::bind_method(D_METHOD("set_content_scale_render_scale", "scale"), &Window::set_content_scale_render_scale);
+	ClassDB::bind_method(D_METHOD("get_content_scale_render_scale"), &Window::get_content_scale_render_scale);
+
 	ClassDB::bind_method(D_METHOD("set_mouse_passthrough_polygon", "polygon"), &Window::set_mouse_passthrough_polygon);
 	ClassDB::bind_method(D_METHOD("get_mouse_passthrough_polygon"), &Window::get_mouse_passthrough_polygon);
 
@@ -3464,6 +3495,7 @@ void Window::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "content_scale_aspect", PROPERTY_HINT_ENUM, "Ignore,Keep,Keep Width,Keep Height,Expand"), "set_content_scale_aspect", "get_content_scale_aspect");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "content_scale_stretch", PROPERTY_HINT_ENUM, "Fractional,Integer"), "set_content_scale_stretch", "get_content_scale_stretch");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "content_scale_factor", PROPERTY_HINT_RANGE, "0.5,8.0,0.01"), "set_content_scale_factor", "get_content_scale_factor");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "content_scale_render_scale", PROPERTY_HINT_RANGE, "0.25,2.0,0.01"), "set_content_scale_render_scale", "get_content_scale_render_scale");
 
 #ifndef DISABLE_DEPRECATED
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_translate", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_auto_translate", "is_auto_translating");

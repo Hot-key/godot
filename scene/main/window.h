@@ -154,6 +154,7 @@ private:
 	ContentScaleAspect content_scale_aspect = CONTENT_SCALE_ASPECT_IGNORE;
 	ContentScaleStretch content_scale_stretch = CONTENT_SCALE_STRETCH_FRACTIONAL;
 	real_t content_scale_factor = 1.0;
+	real_t content_scale_render_scale = 1.0;
 
 	RID accessibility_title_element;
 	RID accessibility_announcement_element;
@@ -394,6 +395,9 @@ public:
 
 	void set_content_scale_factor(real_t p_factor);
 	real_t get_content_scale_factor() const;
+
+	void set_content_scale_render_scale(real_t p_scale);
+	real_t get_content_scale_render_scale() const;
 
 	void set_nonclient_area(const Rect2i &p_rect);
 	Rect2i get_nonclient_area() const;
